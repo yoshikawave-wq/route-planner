@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>ルートプランナー</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<style>
+  :root {
+    --ink: #1f2a24;
+    --paper: #f6f3ea;
+    --panel: #fffdf7;
+    --line: #d8d0b8;
+    --route: #c1541f;
+    --route-soft: #f0d9c8;
+    --pin: #2f5d4f;
+    --pin-start: #c1541f;
+    --accent: #8a9a5b;
+    --mono: "IBM Plex Mono", "Courier New", monospace;
+    --serif: "Georgia", "Iowan Old Style", serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    padding: 18px 24px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 20px;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+  }
+  header .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #6b6250;
+  }
+  .layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: 0;
+  }
+  .panel {
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .panel label {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #6b6250;
+    display: block;
+    margin-bottom: 6px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 130px;
+    resize: vertical;
+    font-family: var(--serif);
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: #fff;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .hint {
+    font-size: 11.5px;
+    color: #8a8168;
+    margin: 6px 0 16px;
+    line-height: 1.5;
+  }
+  button#runBtn {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    background: var(--pin);
+    color: #fff;
+    border: none;
+    padding: 11px 14px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  button#runBtn:hover { background: #24473c; }
+  button#runBtn:disabled { background: #a9ab9c; cursor: default; }
+
+  .status {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: #6b6250;
+    margin-top: 10px;
+    min-height: 16px;
+  }
+  .status.err { color: var(--route); }
+
+  .summary {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+    display: none;
+  }
+  .summary.show { display: block; }
+  .summary .stats {
+    display: flex;
+    gap: 18px;
+    margin-bottom: 14px;
+  }
+  .summary .stat .num {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--route);
+    line-height: 1;
+  }
+  .summary .stat .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8a8168;
+    margin-top: 3px;
+  }
+  ol#stops {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: stop;
+  }
+  ol#stops li {
+    counter-increment: stop;
+    display: flex;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px solid #eee7d3;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  ol#stops li .badge {
+    flex: 0 0 auto;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--pin);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  ol#stops li:first-child .badge { background: var(--pin-start); }
+  ol#stops li .addr { flex: 1; }
+  ol#stops li .leg {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: #8a8168;
+    display: block;
+    margin-top: 2px;
+  }
+
+  #map {
+    height: 100%;
+    width: 100%;
+    background: #e9e4d4;
+  }
+
+  .leaflet-popup-content-wrapper {
+    background: var(--panel);
+    color: var(--ink);
+    font-family: var(--serif);
+    border-radius: 4px;
+  }
+  .pin-label {
+    background: var(--pin);
+    color: #fff;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    width: 24px;
+    height: 24px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  }
+  .pin-label span { transform: rotate(45deg); }
+  .pin-label.start { background: var(--pin-start); }
+
+  @media (max-width: 720px) {
+    .layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .panel { border-right: none; border-bottom: 1px solid var(--line); max-height: 45vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ルートプランナー</h1>
+  <div class="tag">Address → Pins → Optimized Route</div>
+</header>
+
+<div class="layout">
+  <div class="panel">
+    <label for="addrInput">住所リスト（1行に1件、最初の行が出発地）</label>
+    <textarea id="addrInput" placeholder="東京駅
+渋谷スクランブル交差点
+浅草寺
+東京タワー
+上野公園">東京駅
+渋谷スクランブル交差点
+浅草寺
+東京タワー
+上野公園</textarea>
+    <div class="hint">出発地は固定、残りの立ち寄り順は自動で最短になるよう並べ替えます（実際の道路距離ベース）。</div>
+    <button id="runBtn">地図に表示してルート作成</button>
+    <div class="status" id="statusMsg"></div>
+
+    <div class="summary" id="summary">
+      <div class="stats">
+        <div class="stat">
+          <div class="num" id="statDist">–</div>
+          <div class="lbl">走行距離 (km)</div>
+        </div>
+        <div class="stat">
+          <div class="num" id="statTime">–</div>
+          <div class="lbl">所要時間</div>
+        </div>
+      </div>
+      <ol id="stops"></ol>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script>
+const map = L.map('map', { zoomControl: true }).setView([35.681, 139.767], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+let markers = [];
+let routeLine = null;
+
+const statusEl = document.getElementById('statusMsg');
+const runBtn = document.getElementById('runBtn');
+const summaryEl = document.getElementById('summary');
+const stopsEl = document.getElementById('stops');
+
+function setStatus(msg, isErr) {
+  statusEl.textContent = msg || '';
+  statusEl.className = 'status' + (isErr ? ' err' : '');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function geocode(address) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(address);
+  const res = await fetch(url, { headers: { 'Accept-Language': 'ja' } });
+  if (!res.ok) throw new Error('geocode failed: ' + address);
+  const data = await res.json();
+  if (!data.length) throw new Error('見つかりません: ' + address);
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), display: data[0].display_name };
+}
+
+function clearMap() {
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
+}
+
+function pinIcon(label, isStart) {
+  return L.divIcon({
+    className: '',
+    html: '<div class="pin-label' + (isStart ? ' start' : '') + '"><span>' + label + '</span></div>',
+    iconSize: [26, 26],
+    iconAnchor: [13, 26]
+  });
+}
+
+async function run() {
+  const lines = document.getElementById('addrInput').value
+    .split('\n').map(s => s.trim()).filter(Boolean);
+
+  if (lines.length < 2) {
+    setStatus('住所を2件以上入力してください。', true);
+    return;
+  }
+
+  runBtn.disabled = true;
+  summaryEl.classList.remove('show');
+  clearMap();
+
+  try {
+    // 1. Geocode all addresses sequentially (Nominatim usage policy: ~1 req/sec)
+    const points = [];
+    for (let i = 0; i < lines.length; i++) {
+      setStatus('住所を検索中… (' + (i + 1) + '/' + lines.length + ') ' + lines[i]);
+      const p = await geocode(lines[i]);
+      points.push({ ...p, original: lines[i] });
+      if (i < lines.length - 1) await sleep(1000);
+    }
+
+    // 2. Ask OSRM's trip service to compute an optimized visiting order
+    //    over the real road network, keeping the first point as the source.
+    setStatus('最適なルートを計算中…');
+    const coordStr = points.map(p => p.lon + ',' + p.lat).join(';');
+    const tripUrl = 'https://router.project-osrm.org/trip/v1/driving/' + coordStr +
+      '?source=first&roundtrip=false&geometries=geojson&overview=full';
+    const tripRes = await fetch(tripUrl);
+    const tripData = await tripRes.json();
+
+    if (tripData.code !== 'Ok') {
+      throw new Error('ルート計算に失敗しました: ' + (tripData.message || tripData.code));
+    }
+
+    const trip = tripData.trips[0];
+    const waypoints = tripData.waypoints; // has waypoint_index per input point, trips_index
+
+    // order: sort original points by their position in the optimized trip
+    const ordered = waypoints
+      .map((wp, idx) => ({ ...points[idx], order: wp.waypoint_index }))
+      .sort((a, b) => a.order - b.order);
+
+    // 3. Draw markers
+    const bounds = [];
+    ordered.forEach((p, i) => {
+      const marker = L.marker([p.lat, p.lon], { icon: pinIcon(i + 1, i === 0) })
+        .addTo(map)
+        .bindPopup('<strong>' + (i + 1) + '. ' + p.original + '</strong><br><span style="font-size:12px;color:#777">' + p.display + '</span>');
+      markers.push(marker);
+      bounds.push([p.lat, p.lon]);
+    });
+
+    // 4. Draw the actual road-following route
+    const geoCoords = trip.geometry.coordinates.map(c => [c[1], c[0]]);
+    routeLine = L.polyline(geoCoords, {
+      color: getComputedStyle(document.documentElement).getPropertyValue('--route').trim(),
+      weight: 4,
+      opacity: 0.85
+    }).addTo(map);
+
+    map.fitBounds(bounds, { padding: [40, 40] });
+
+    // 5. Summary panel
+    document.getElementById('statDist').textContent = (trip.distance / 1000).toFixed(1);
+    const mins = Math.round(trip.duration / 60);
+    document.getElementById('statTime').textContent = mins >= 60
+      ? Math.floor(mins / 60) + '時間' + (mins % 60) + '分'
+      : mins + '分';
+
+    stopsEl.innerHTML = '';
+    ordered.forEach((p, i) => {
+      const li = document.createElement('li');
+      const legInfo = (i === 0)
+        ? '出発地'
+        : ('前の地点から立ち寄り ' + (i + 1));
+      li.innerHTML = '<div class="badge">' + (i + 1) + '</div>' +
+        '<div class="addr">' + p.original + '<span class="leg">' + legInfo + '</span></div>';
+      stopsEl.appendChild(li);
+    });
+    summaryEl.classList.add('show');
+
+    setStatus('完了：' + ordered.length + '地点を最短ルートで並べ替えました。');
+  } catch (err) {
+    console.error(err);
+    setStatus('エラー: ' + err.message, true);
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+runBtn.addEventListener('click', run);
+</script>
+</body>
+</html>
